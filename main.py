@@ -1,13 +1,18 @@
 
-from models.product_model import add_product, view_all_products, update_product, delete_product
-from models.order_model import add_to_cart, get_cart_items, place_order, view_orders
+import os
+import sys
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 from tkinter import Tk
-from gui.app_window import GroceryAppGUI
+from gui.modern_app import ModernGroceryApp
 
 if __name__ == "__main__":
     root = Tk()
-    app = GroceryAppGUI(root)
+    app = ModernGroceryApp(root)
     root.mainloop()
+
 
 
 
