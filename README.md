@@ -345,7 +345,7 @@ For issues or questions:
 
 ---
 
-**Made with ❤️ for Modern Grocery Stores**
+**Develop By PaveshDev**
 
 *Transform your grocery business with digital excellence!*
 
