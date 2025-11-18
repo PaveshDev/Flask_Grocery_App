@@ -1,6 +1,6 @@
 """
 Modern E-Commerce Grocery App - Main Application
-Complete rewrite with enhanced features
+GUI Layer that uses service-based architecture
 """
 import tkinter as tk
 from tkinter import messagebox, scrolledtext, ttk
@@ -8,32 +8,32 @@ from PIL import Image, ImageTk
 import os
 import sys
 from datetime import datetime, timedelta
-import calendar
 
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 try:
-    # Try importing from config folder first
     from config.db_config import connect_db
 except ImportError:
-    # Fall back to root directory if config folder doesn't exist yet
     from db_config import connect_db
-from models.user_model import login_user, login_staff, register_user, get_user_info, update_user_profile, change_password, update_username
-from models.product_model import (get_all_categories, get_products_by_category, 
-                                 search_products, add_product, update_product, 
-                                 delete_product, get_low_stock_products, get_product_sold_count,
-                                 get_inventory_stats, get_expiring_soon_items, get_expired_items,
-                                 remove_expired_item, get_inventory_by_category, 
-                                 get_categories_with_count, get_products_in_category,
-                                 update_product_details, delete_product_by_id, get_product_by_id_full)
-from models.order_model import (add_to_cart, get_cart_items, remove_from_cart,
-                               place_order, get_user_orders, get_user_notifications,
-                               mark_notification_read, get_unread_count, update_cart_quantity,
-                               get_all_admin_orders, get_order_details)
-from models.inventory_model import (add_inventory_batch, get_expiring_soon, 
-                                   get_inventory_stats, get_all_inventory)
-from utils.image_helper import browse_image, save_product_image, load_image_for_display, ensure_image_directory
+
+# Import UI components
+from gui.ui_components import (
+    UIColors,
+    UIComponentFactory,
+    ColorUtils,
+    AnimationUtils,
+    CalendarPickerDialog
+)
+
+# Import services
+from services import (
+    UserService,
+    ProductService,
+    OrderService,
+    InventoryService,
+    ImageService
+)
 
 
 class ModernGroceryApp:
@@ -43,50 +43,27 @@ class ModernGroceryApp:
         self.root.geometry("1200x800")
         self.root.configure(bg='#FAFAFA')
         
-        # Animation state
-        self.animation_queue = []
-        self.glow_state = 0
-        self.hover_animations = {}
-        
         # User session
         self.current_user = None
         self.current_staff = None
         self.user_type = None  # 'customer' or 'staff'
         
         # Screen state tracking
-        self.current_screen = 'login'  # Track which screen is active
-        self.login_tab = 'customer'     # Track which login tab is selected
-        self.current_category = None    # Track selected category in shop
+        self.current_screen = 'login'
+        self.login_tab = 'customer'
+        self.current_category = None
         
-        # Modern E-commerce Theme (Daraz-inspired) - Professional & Beautiful
-        self.colors = {
-            'primary': '#8B3FD9',      # Purple (main brand - Daraz style)
-            'primary_dark': '#6D2DAD', # Darker purple
-            'secondary': '#FFC107',    # Gold/Amber accent
-            'accent': '#2196F3',       # Blue accent
-            'accent_light': '#E3F2FD', # Light blue
-            'danger': '#F44336',       # Red
-            'success': '#4CAF50',      # Green
-            'bg': '#F8F9FA',          # Light background
-            'bg_secondary': '#FFFFFF', # White
-            'card': '#FFFFFF',         # White cards
-            'card_shadow': '#E0E0E0',  # Shadow color
-            'text': '#212121',         # Dark text
-            'text_light': '#757575',   # Medium gray
-            'text_muted': '#BDBDBD',   # Light gray
-            'border': '#EEEEEE',       # Light border
-            'input_bg': '#F5F5F5',     # Input background
-            'input_border': '#DDDDDD', # Input border
-            'hover': '#F5F5F5',        # Hover state
-            'rating': '#FFC107',       # Yellow for ratings
-            'badge': '#FF4081'         # Pink for badges
-        }
+        # Get color scheme from UIColors
+        self.colors = UIColors.get_colors()
+        
+        # Create UI component factory
+        self.ui_factory = UIComponentFactory(self.colors)
         
         # Image cache
         self.image_cache = {}
         
         # Ensure image directory exists
-        ensure_image_directory()
+        ImageService.ensure_image_directory()
         
         # Start with login screen
         self.show_login_screen()
@@ -97,323 +74,52 @@ class ModernGroceryApp:
             widget.destroy()
         self.image_cache.clear()
     
-    # ==================== COMMON UI COMPONENTS ====================
-    
-    def darken_color(self, color_hex):
-        """Darken a hex color by reducing brightness"""
-        # Remove '#' if present
-        color_hex = color_hex.lstrip('#')
-        
-        # Convert hex to RGB
-        try:
-            r = int(color_hex[0:2], 16)
-            g = int(color_hex[2:4], 16)
-            b = int(color_hex[4:6], 16)
-        except:
-            return color_hex
-        
-        # Darken by reducing each component
-        r = max(0, int(r * 0.8))
-        g = max(0, int(g * 0.8))
-        b = max(0, int(b * 0.8))
-        
-        # Convert back to hex
-        return f"#{r:02x}{g:02x}{b:02x}"
-    
-    def open_calendar_picker(self, date_entry_field):
-        """Open a calendar picker window to select date"""
-        # Create new window
-        cal_window = tk.Toplevel(self.root)
-        cal_window.title("Pick Date")
-        cal_window.geometry("400x350")
-        cal_window.resizable(False, False)
-        cal_window.grab_set()
-        
-        # Center on parent window
-        cal_window.transient(self.root)
-        
-        # Current date
-        current_date = datetime.now()
-        selected_date = [current_date]
-        
-        # Header frame with month/year navigation
-        header_frame = tk.Frame(cal_window, bg=self.colors['primary'])
-        header_frame.pack(fill=tk.X, padx=10, pady=10)
-        
-        month_year_label = tk.Label(
-            header_frame,
-            text=current_date.strftime("%B %Y"),
-            font=('Segoe UI', 14, 'bold'),
-            bg=self.colors['primary'],
-            fg='white'
-        )
-        month_year_label.pack(pady=10)
-        
-        nav_frame = tk.Frame(header_frame, bg=self.colors['primary'])
-        nav_frame.pack(pady=5)
-        
-        def update_calendar(date_obj):
-            """Update calendar display"""
-            selected_date[0] = date_obj
-            month_year_label.config(text=date_obj.strftime("%B %Y"))
-            
-            # Clear previous calendar
-            for widget in cal_grid_frame.winfo_children():
-                widget.destroy()
-            
-            # Draw calendar
-            draw_calendar(date_obj)
-        
-        def prev_month():
-            """Go to previous month"""
-            prev_date = selected_date[0] - timedelta(days=selected_date[0].day)
-            update_calendar(prev_date)
-        
-        def next_month():
-            """Go to next month"""
-            first_of_month = selected_date[0].replace(day=1)
-            next_date = first_of_month + timedelta(days=32)
-            next_date = next_date.replace(day=1)
-            update_calendar(next_date)
-        
-        tk.Button(
-            nav_frame,
-            text="< Prev",
-            command=prev_month,
-            bg=self.colors['secondary'],
-            fg='white',
-            font=('Segoe UI', 9, 'bold'),
-            relief=tk.FLAT,
-            padx=10,
-            cursor='hand2'
-        ).pack(side=tk.LEFT, padx=5)
-        
-        tk.Button(
-            nav_frame,
-            text="Next >",
-            command=next_month,
-            bg=self.colors['secondary'],
-            fg='white',
-            font=('Segoe UI', 9, 'bold'),
-            relief=tk.FLAT,
-            padx=10,
-            cursor='hand2'
-        ).pack(side=tk.LEFT, padx=5)
-        
-        # Calendar grid frame
-        cal_grid_frame = tk.Frame(cal_window, bg=self.colors['bg'])
-        cal_grid_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
-        def draw_calendar(date_obj):
-            """Draw calendar for given date"""
-            year = date_obj.year
-            month = date_obj.month
-            
-            # Weekday headers
-            weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-            for i, day in enumerate(weekdays):
-                tk.Label(
-                    cal_grid_frame,
-                    text=day,
-                    font=('Segoe UI', 9, 'bold'),
-                    bg=self.colors['primary'],
-                    fg='white',
-                    width=5,
-                    relief=tk.RAISED,
-                    bd=1
-                ).grid(row=0, column=i, sticky='nsew', padx=2, pady=2)
-            
-            # Get calendar matrix
-            cal_matrix = calendar.monthcalendar(year, month)
-            
-            # Display dates
-            for week_num, week in enumerate(cal_matrix, 1):
-                for day_num, day in enumerate(week):
-                    if day == 0:
-                        # Empty cell for days outside this month
-                        tk.Label(
-                            cal_grid_frame,
-                            text='',
-                            bg=self.colors['bg'],
-                            width=5,
-                            height=2
-                        ).grid(row=week_num, column=day_num, sticky='nsew', padx=2, pady=2)
-                    else:
-                        # Date button
-                        is_today = (day == datetime.now().day and 
-                                   month == datetime.now().month and 
-                                   year == datetime.now().year)
-                        
-                        btn_bg = self.colors['accent'] if is_today else self.colors['card']
-                        btn_fg = 'white' if is_today else self.colors['text']
-                        
-                        def select_date(d=day, m=month, y=year):
-                            """Select date and close window"""
-                            selected = datetime(y, m, d).strftime('%Y-%m-%d')
-                            # Temporarily enable field to update it
-                            date_entry_field.config(state=tk.NORMAL)
-                            date_entry_field.delete(0, tk.END)
-                            date_entry_field.insert(0, selected)
-                            date_entry_field.config(state=tk.DISABLED)
-                            cal_window.destroy()
-                        
-                        btn = tk.Button(
-                            cal_grid_frame,
-                            text=str(day),
-                            command=select_date,
-                            bg=btn_bg,
-                            fg=btn_fg,
-                            font=('Segoe UI', 10, 'bold'),
-                            width=5,
-                            height=2,
-                            relief=tk.RAISED,
-                            bd=1,
-                            cursor='hand2'
-                        )
-                        btn.grid(row=week_num, column=day_num, sticky='nsew', padx=2, pady=2)
-                        
-                        # Hover effect
-                        def on_enter(event, button=btn):
-                            if button['text'].strip():
-                                button.config(bg=self.colors['primary'], fg='white')
-                        
-                        def on_leave(event, button=btn, bg=btn_bg, fg=btn_fg):
-                            if button['text'].strip():
-                                button.config(bg=bg, fg=fg)
-                        
-                        btn.bind('<Enter>', on_enter)
-                        btn.bind('<Leave>', on_leave)
-        
-        # Draw initial calendar
-        draw_calendar(current_date)
-        
-        # Close button
-        btn_frame = tk.Frame(cal_window, bg=self.colors['bg'])
-        btn_frame.pack(fill=tk.X, padx=10, pady=10)
-        
-        tk.Button(
-            btn_frame,
-            text="✕ Close",
-            command=cal_window.destroy,
-            bg=self.colors['text_light'],
-            fg=self.colors['text'],
-            font=('Segoe UI', 9, 'bold'),
-            relief=tk.FLAT,
-            padx=15,
-            pady=8,
-            cursor='hand2'
-        ).pack(fill=tk.X)
+    # ==================== UI WRAPPER METHODS ====================
+    # These methods delegate to UIComponentFactory and utility classes
     
     def create_button(self, parent, text, command, style='primary', width=20):
-        """Create modern e-commerce button with smooth effects"""
-        bg_color = self.colors.get(style, self.colors['primary'])
-        
-        btn = tk.Button(
-            parent,
-            text=text,
-            command=command,
-            bg=bg_color,
-            fg='white',
-            font=('Segoe UI', 11, 'bold'),
-            relief=tk.FLAT,
-            padx=25,
-            pady=12,
-            width=width,
-            cursor='hand2',
-            borderwidth=0,
-            activebackground=self.colors['primary_dark'],
-            activeforeground='white',
-            highlightthickness=0
-        )
-        
-        # Smooth hover effect
-        def on_enter(e):
-            btn.config(bg=self.colors['primary_dark'])
-        
-        def on_leave(e):
-            btn.config(bg=bg_color)
-        
-        btn.bind('<Enter>', on_enter)
-        btn.bind('<Leave>', on_leave)
-        return btn
-    
-    def _darken_color(self, color):
-        """Darken a hex color by 20%"""
-        color = color.lstrip('#')
-        rgb = tuple(int(color[i:i+2], 16) for i in (0, 2, 4))
-        darker = tuple(max(0, int(c * 0.8)) for c in rgb)
-        return '#%02x%02x%02x' % darker
-    
-    def _lighten_color(self, color):
-        """Lighten a hex color by 20% for hover effect"""
-        color = color.lstrip('#')
-        rgb = tuple(int(color[i:i+2], 16) for i in (0, 2, 4))
-        lighter = tuple(min(255, int(c * 1.15)) for c in rgb)
-        return '#%02x%02x%02x' % lighter
+        """Create modern button using UI factory"""
+        return self.ui_factory.create_button(parent, text, command, style, width)
     
     def create_entry(self, parent, show=None, width=30):
-        """Create modern entry field"""
-        entry = tk.Entry(
-            parent,
-            font=('Segoe UI', 11),
-            relief=tk.SOLID,
-            borderwidth=1,
-            show=show,
-            width=width,
-            bg=self.colors['input_bg'],
-            fg=self.colors['text'],
-            insertbackground=self.colors['primary'],
-            highlightthickness=0
-        )
-        return entry
+        """Create modern entry using UI factory"""
+        return self.ui_factory.create_entry(parent, show, width)
     
     def create_label(self, parent, text, font_size=11, bold=False, color='text'):
-        """Create anime-styled label with gradient-like text"""
-        font_weight = 'bold' if bold else 'normal'
-        label = tk.Label(
-            parent,
-            text=text,
-            font=('Segoe UI', font_size, font_weight),
-            bg=self.colors['card'] if parent.cget('bg') == self.colors['card'] else self.colors['bg'],
-            fg=self.colors[color]
-        )
-        return label
+        """Create styled label using UI factory"""
+        return self.ui_factory.create_label(parent, text, font_size, bold, color)
     
     def create_card(self, parent, **kwargs):
-        """Create clean white card with subtle shadow"""
-        card = tk.Frame(
-            parent,
-            bg=self.colors['card'],
-            relief=tk.FLAT,
-            borderwidth=0,
-            highlightthickness=1,
-            highlightbackground=self.colors['border'],
-            **kwargs
-        )
-        return card
+        """Create card using UI factory"""
+        return self.ui_factory.create_card(parent, **kwargs)
     
-    # ==================== ANIMATION HELPERS ====================
+    def darken_color(self, color_hex):
+        """Darken color using ColorUtils"""
+        return ColorUtils.darken_color(color_hex)
+    
+    def _darken_color(self, color):
+        """Darken color helper"""
+        return self.darken_color(color)
+    
+    def _lighten_color(self, color):
+        """Lighten color using ColorUtils"""
+        return ColorUtils.lighten_color(color)
+    
+    def open_calendar_picker(self, date_entry_field):
+        """Open calendar picker dialog"""
+        CalendarPickerDialog(self.root, self.colors, date_entry_field)
     
     def pulse_animation(self, widget, color1, color2, step=0):
-        """Create pulsing animation effect"""
-        if step < 3:
-            widget.after(100, lambda: self.pulse_animation(widget, color1, color2, step + 1))
+        """Pulse animation using AnimationUtils"""
+        AnimationUtils.pulse_animation(widget, color1, color2, step)
     
     def fade_in(self, widget, alpha=0):
-        """Fade in animation for widgets"""
-        if alpha < 1.0:
-            alpha += 0.1
-            widget.after(30, lambda: self.fade_in(widget, alpha))
+        """Fade in animation using AnimationUtils"""
+        AnimationUtils.fade_in(widget, alpha)
     
     def slide_in(self, widget, start_x, end_x, current_x=None):
-        """Slide in animation from left or right"""
-        if current_x is None:
-            current_x = start_x
-        
-        if abs(current_x - end_x) > 5:
-            current_x += (end_x - start_x) * 0.2
-            widget.place(x=current_x)
-            widget.after(20, lambda: self.slide_in(widget, start_x, end_x, current_x))
+        """Slide in animation using AnimationUtils"""
+        AnimationUtils.slide_in(widget, start_x, end_x, current_x)
     
     # ==================== LOGIN & REGISTRATION ====================
     
@@ -634,7 +340,7 @@ class ModernGroceryApp:
                 return
             
             if user_type == 'customer':
-                user = login_user(username, password)
+                user = UserService.login_user(username, password)
                 if user:
                     self.current_user = user
                     self.user_type = 'customer'
@@ -643,7 +349,7 @@ class ModernGroceryApp:
                 else:
                     messagebox.showerror("Error", "Invalid credentials")
             else:
-                staff = login_staff(username, password)
+                staff = UserService.login_staff(username, password)
                 if staff:
                     self.current_staff = staff
                     self.user_type = 'staff'
@@ -968,7 +674,8 @@ class ModernGroceryApp:
                 return
             
             try:
-                if register_user(username, password, email, full_name, phone, address):
+                success, result = UserService.register_user(username, password, email, full_name, phone, address)
+                if success:
                     messagebox.showinfo("Success", "Registration successful! Please login.")
                     self.show_login_screen()
                 else:
@@ -1310,7 +1017,7 @@ class ModernGroceryApp:
             fg=self.colors['text']
         ).pack(pady=15)
         
-        categories = get_all_categories()
+        categories = ProductService.get_all_categories()
         
         # All products button
         btn = tk.Button(
@@ -1382,7 +1089,7 @@ class ModernGroceryApp:
         for widget in container.winfo_children():
             widget.destroy()
         
-        products = get_products_by_category(category_id)
+        products = ProductService.get_products_by_category(category_id)
         
         if not products:
             tk.Label(
@@ -1446,7 +1153,7 @@ class ModernGroceryApp:
         
         try:
             if product[3]:
-                img = load_image_for_display(product[3], (150, 150))
+                img = ImageService.load_image_for_display(product[3], (150, 150))
                 self.image_cache[f"product_{product[0]}"] = img
                 image_label.config(image=img)
             else:
@@ -1522,7 +1229,7 @@ class ModernGroceryApp:
         # Add to cart button
         def add_to_cart_action():
             if product[6] > 0:
-                success, msg = add_to_cart(self.current_user[0], product[0], 1)
+                success, msg = OrderService.add_to_cart(self.current_user[0], product[0], 1)
                 if success:
                     messagebox.showinfo("Success", "Added to cart!")
                 else:
@@ -1629,7 +1336,7 @@ class ModernGroceryApp:
         
         try:
             if product[3]:
-                img = load_image_for_display(product[3], (400, 400))
+                img = ImageService.load_image_for_display(product[3], (400, 400))
                 self.image_cache[f"product_detail_{product[0]}"] = img
                 image_label.config(image=img)
             else:
@@ -1909,7 +1616,7 @@ class ModernGroceryApp:
                 if quantity > stock:
                     messagebox.showwarning("Insufficient Stock", f"Only {stock} units available")
                     return
-                success, msg = add_to_cart(self.current_user[0], product[0], quantity)
+                success, msg = OrderService.add_to_cart(self.current_user[0], product[0], quantity)
                 if success:
                     messagebox.showinfo("Success", f"✓ Added {quantity} item(s) to cart!")
                     self.show_shop_screen()
@@ -1962,7 +1669,7 @@ class ModernGroceryApp:
         main_frame = tk.Frame(self.root, bg=self.colors['bg'])
         main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
         
-        cart_items = get_cart_items(self.current_user[0])
+        cart_items = OrderService.get_cart_items(self.current_user[0])
         
         if not cart_items:
             tk.Label(
@@ -2186,7 +1893,7 @@ class ModernGroceryApp:
                 messagebox.showerror("Error", "Please fill in all fields")
                 return
             
-            success, msg = place_order(self.current_user[0], address, phone, payment)
+            success, msg = OrderService.place_order(self.current_user[0], address, phone, payment)
             if success:
                 messagebox.showinfo("Success", msg)
                 self.show_customer_dashboard()
@@ -2231,7 +1938,7 @@ class ModernGroceryApp:
         main_frame = tk.Frame(self.root, bg=self.colors['bg'])
         main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
         
-        orders = get_user_orders(self.current_user[0])
+        orders = OrderService.get_user_orders(self.current_user[0])
         
         if not orders:
             tk.Label(
@@ -2791,7 +2498,7 @@ class ModernGroceryApp:
         stats_frame.pack(fill=tk.X, pady=(0, 30))
         
         # Get statistics
-        inv_stats = get_inventory_stats()
+        inv_stats = InventoryService.get_inventory_stats()
         
         stats = [
             ("🔢\nTotal Items", self.show_items_by_category, self.colors['secondary']),
@@ -2941,7 +2648,7 @@ class ModernGroceryApp:
                                        font=('Segoe UI', 9), fg=self.colors['success'])
         
         def select_image():
-            path = browse_image()
+            path = ImageService.browse_image()
             print(f"\n{'='*80}")
             print(f"SELECT IMAGE DEBUG:")
             print(f"  browse_image() returned: '{path}'")
@@ -2957,7 +2664,7 @@ class ModernGroceryApp:
                 print(f"  ✓ Stored in dict: {selected_image_path['path']}")
                 
                 try:
-                    img = load_image_for_display(path, (200, 200))
+                    img = ImageService.load_image_for_display(path, (200, 200))
                     self.image_cache['new_product'] = img
                     image_label.config(image=img, text="")
                     selected_image_label.config(text=f"✓ Image selected: {os.path.basename(path)}")
@@ -2989,7 +2696,7 @@ class ModernGroceryApp:
         # Category
         tk.Label(form_frame, text="Category *", bg=self.colors['card'], fg=self.colors['text'],
                 font=('Segoe UI', 11, 'bold')).grid(row=1, column=0, sticky='w', pady=10)
-        categories = get_all_categories()
+        categories = ProductService.get_all_categories()
         category_var = tk.StringVar()
         category_dropdown = ttk.Combobox(
             form_frame,
@@ -3140,7 +2847,7 @@ class ModernGroceryApp:
                 image_filename = None
                 if selected_image_path["path"]:
                     print(f"DEBUG submit: Saving image from: {selected_image_path['path']}")
-                    image_filename = save_product_image(selected_image_path["path"], name)
+                    image_filename = ImageService.save_product_image(selected_image_path["path"], name)
                     print(f"DEBUG submit: Image filename returned: {image_filename}")
                     if image_filename is None:
                         print("ERROR: save_product_image returned None!")
@@ -3160,7 +2867,7 @@ class ModernGroceryApp:
                 print(f"  manufactured_date={manufactured_date}")
                 print(f"  expiry_date={expiry_date}")
                 
-                product_id = add_product(name, category_id, description, image_filename,
+                product_id = ProductService.add_product(name, category_id, description, image_filename,
                                         price, unit, stock, min_stock)
                 
                 # Update with dates
@@ -3703,7 +3410,8 @@ class ModernGroceryApp:
                         pass  # If date parsing fails, let database handle validation
                 
                 # Update product (manufactured date stays unchanged)
-                if update_product_details(product_id, new_name, new_price, new_stock, new_unit, new_exp_date, None):
+                success, msg = ProductService.update_product(product_id, new_name, new_price, new_stock, new_unit, new_exp_date, None)
+                if success:
                     messagebox.showinfo("Success", f"Product '{new_name}' updated successfully!")
                     self.show_manage_category_products(category_id, category_name)
                 else:
@@ -3745,7 +3453,8 @@ class ModernGroceryApp:
         )
         
         if result:
-            if delete_product_by_id(product_id):
+            success, msg = ProductService.delete_product(product_id)
+            if success:
                 messagebox.showinfo("Success", f"Product '{product_name}' has been deleted!")
                 # Refresh the current category's products
                 self.show_manage_category_products(category_id, category_name)
@@ -4220,7 +3929,7 @@ class ModernGroceryApp:
         main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
         
         # Get expiring soon items
-        items = get_expiring_soon_items()
+        items = ProductService.get_expiring_soon_items()
         
         if not items:
             tk.Label(
