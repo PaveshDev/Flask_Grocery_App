@@ -748,7 +748,7 @@ class ModernGroceryApp:
         right_header = tk.Frame(header_content, bg='white')
         right_header.pack(side=tk.RIGHT)
         
-        unread_count = get_unread_count(self.current_user[0])
+        unread_count = OrderService.get_unread_count(self.current_user[0])
         notif_text = f"🔔" if unread_count == 0 else f"🔔 {unread_count}"
         
         notif_btn = tk.Label(
@@ -1284,7 +1284,7 @@ class ModernGroceryApp:
         price = product[4]
         discount = product[8]
         final_price = price * (1 - discount / 100) if discount > 0 else price
-        sold_count = get_product_sold_count(product[0])
+        sold_count = ProductService.get_product_sold_count(product[0])
         
         # ==== HEADER ====
         header = tk.Frame(self.root, bg='white', height=70)
@@ -1843,7 +1843,7 @@ class ModernGroceryApp:
         ).pack(pady=20)
         
         # Get user info
-        user_info = get_user_info(self.current_user[0])
+        user_info = UserService.get_user_info(self.current_user[0])
         
         # Form
         form_frame = tk.Frame(card, bg=self.colors['card'])
@@ -2048,7 +2048,7 @@ class ModernGroceryApp:
         main_frame = tk.Frame(self.root, bg=self.colors['bg'])
         main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
         
-        notifications = get_user_notifications(self.current_user[0])
+        notifications = OrderService.get_user_notifications(self.current_user[0])
         
         if not notifications:
             tk.Label(
@@ -2199,7 +2199,7 @@ class ModernGroceryApp:
         ).pack(anchor='w', pady=(0, 30))
         
         # Get current user info
-        current_info = get_user_info(self.current_user[0])
+        current_info = UserService.get_user_info(self.current_user[0])
         
         entries = {}
         
@@ -2374,11 +2374,11 @@ class ModernGroceryApp:
                     return
                 
                 # Update basic profile info
-                update_user_profile(self.current_user[0], full_name, phone, address)
+                UserService.update_user_profile(self.current_user[0], full_name, phone, address)
                 
                 # Update username if provided
                 if new_username and new_username.strip():
-                    success, msg = update_username(self.current_user[0], new_username)
+                    success, msg = UserService.update_username(self.current_user[0], new_username)
                     if not success:
                         messagebox.showwarning("Username Error", msg)
                         return
@@ -2922,7 +2922,7 @@ class ModernGroceryApp:
         main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
         
         # Get categories with count
-        categories = get_categories_with_count()
+        categories = ProductService.get_categories_with_count()
         
         if not categories:
             tk.Label(
@@ -3031,7 +3031,7 @@ class ModernGroceryApp:
         main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
         
         # Get products in category
-        products = get_products_in_category(category_id)
+        products = ProductService.get_products_in_category(category_id)
         
         if not products:
             tk.Label(
@@ -3129,7 +3129,7 @@ class ModernGroceryApp:
         self.current_screen = 'edit_product'
         
         # Get full product details from database
-        product_data = get_product_by_id_full(product_id)
+        product_data = ProductService.get_product_by_id_full(product_id)
         if product_data:
             _, _, db_price, db_stock, db_unit, manufactured_date, db_expiry_date = product_data
         else:
@@ -3486,7 +3486,7 @@ class ModernGroceryApp:
         main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
         
         # Get categories with count
-        categories = get_categories_with_count()
+        categories = ProductService.get_categories_with_count()
         
         if not categories:
             tk.Label(
@@ -3595,7 +3595,7 @@ class ModernGroceryApp:
         main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
         
         # Get products in category
-        products = get_products_in_category(category_id)
+        products = ProductService.get_products_in_category(category_id)
         
         if not products:
             tk.Label(
@@ -3683,7 +3683,7 @@ class ModernGroceryApp:
         main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
         
         # Get all orders
-        orders = get_all_admin_orders()
+        orders = OrderService.get_all_admin_orders()
         
         if not orders:
             tk.Label(
@@ -3801,7 +3801,7 @@ class ModernGroceryApp:
         main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
         
         # Get order details
-        order_info, items = get_order_details(order_id)
+        order_info, items = OrderService.get_order_details(order_id)
         
         if not order_info:
             tk.Label(
@@ -4034,7 +4034,7 @@ class ModernGroceryApp:
         main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
         
         # Get expired items
-        items = get_expired_items()
+        items = ProductService.get_expired_items()
         
         if not items:
             tk.Label(
@@ -4139,7 +4139,7 @@ class ModernGroceryApp:
         main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
         
         # Get categories with count
-        categories = get_categories_with_count()
+        categories = ProductService.get_categories_with_count()
         
         if not categories:
             tk.Label(
@@ -4252,7 +4252,7 @@ class ModernGroceryApp:
         main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
         
         # Get products in category
-        products = get_products_in_category(category_id)
+        products = ProductService.get_products_in_category(category_id)
         
         if not products:
             tk.Label(
