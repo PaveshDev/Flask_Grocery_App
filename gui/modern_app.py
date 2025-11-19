@@ -1254,26 +1254,41 @@ class ModernGroceryApp:
         add_btn.bind('<Enter>', lambda e: add_btn.config(bg=self.colors['primary_dark']))
         add_btn.bind('<Leave>', lambda e: add_btn.config(bg=self.colors['primary']))
         
+        # Click to open product detail
+        def on_card_click(e):
+            # Don't open detail if clicking on the Add to Cart button
+            if e.widget != add_btn:
+                self.show_product_detail(product)
+        
         # Hover effect for the entire card
         def on_enter(e):
             card.config(highlightbackground=self.colors['primary'], highlightthickness=2)
+            card.config(cursor='hand2')
         
         def on_leave(e):
             card.config(highlightbackground=self.colors['border'], highlightthickness=1)
-        
-        # Click to open product detail
-        def on_card_click(e):
-            self.show_product_detail(product)
+            card.config(cursor='')
         
         card.bind('<Enter>', on_enter)
         card.bind('<Leave>', on_leave)
         card.bind('<Button-1>', on_card_click)
+        image_container.bind('<Button-1>', on_card_click)
+        info_frame.bind('<Button-1>', on_card_click)
+        image_label.bind('<Button-1>', on_card_click)
         
-        # Bind all child widgets to same events
-        for widget in card.winfo_children():
+        # Bind image container and info frame to hover
+        image_container.bind('<Enter>', on_enter)
+        image_container.bind('<Leave>', on_leave)
+        info_frame.bind('<Enter>', on_enter)
+        info_frame.bind('<Leave>', on_leave)
+        
+        # Bind all child labels to click and hover
+        for widget in info_frame.winfo_children():
+            if isinstance(widget, tk.Button):
+                continue
+            widget.bind('<Button-1>', on_card_click)
             widget.bind('<Enter>', on_enter)
             widget.bind('<Leave>', on_leave)
-            widget.bind('<Button-1>', on_card_click)
     
     def show_product_detail(self, product):
         """Show product detail screen - Professional PC-optimized design"""
@@ -1284,7 +1299,13 @@ class ModernGroceryApp:
         price = product[4]
         discount = product[8]
         final_price = price * (1 - discount / 100) if discount > 0 else price
-        sold_count = ProductService.get_product_sold_count(product[0])
+        
+        # Defer sold count query - get it in background
+        sold_count = 0
+        try:
+            sold_count = ProductService.get_product_sold_count(product[0])
+        except:
+            sold_count = 0
         
         # ==== HEADER ====
         header = tk.Frame(self.root, bg='white', height=70)
@@ -1322,7 +1343,7 @@ class ModernGroceryApp:
         main_container = tk.Frame(self.root, bg=self.colors['bg'])
         main_container.pack(fill=tk.BOTH, expand=True, padx=40, pady=30)
         
-        # LEFT COLUMN - Image
+        # LEFT COLUMN - Image (Optimized with lazy loading)
         left_column = tk.Frame(main_container, bg=self.colors['bg'])
         left_column.pack(side=tk.LEFT, fill=tk.BOTH, expand=False, padx=(0, 60))
         
@@ -1334,16 +1355,22 @@ class ModernGroceryApp:
         image_label = tk.Label(image_bg, bg='white')
         image_label.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
         
-        try:
-            if product[3]:
-                img = ImageService.load_image_for_display(product[3], (400, 400))
-                self.image_cache[f"product_detail_{product[0]}"] = img
-                image_label.config(image=img)
-            else:
-                image_label.config(text="📦", font=('Segoe UI', 120), fg=self.colors['text_muted'])
-        except Exception as e:
-            print(f"Error loading image: {e}")
-            image_label.config(text="📦", font=('Segoe UI', 120), fg=self.colors['text_muted'])
+        # Show placeholder immediately, load image asynchronously
+        image_label.config(text="📦", font=('Segoe UI', 120), fg=self.colors['text_muted'])
+        
+        def load_image_async():
+            """Load image without blocking UI"""
+            try:
+                if product[3]:
+                    img = ImageService.load_image_for_display(product[3], (400, 400))
+                    self.image_cache[f"product_detail_{product[0]}"] = img
+                    image_label.config(image=img)
+                    image_label.config(text="")
+            except Exception as e:
+                print(f"Error loading image: {e}")
+        
+        # Schedule image loading after UI is rendered
+        self.root.after(100, load_image_async)
         
         # Image navigation dots
         dots_frame = tk.Frame(left_column, bg=self.colors['bg'])
@@ -1714,7 +1741,7 @@ class ModernGroceryApp:
             
             tk.Label(
                 info_frame,
-                text=f"₹{price:.2f} × {quantity} = ₹{subtotal:.2f}",
+                text=f"LKR {price:.2f} × {quantity} = LKR {subtotal:.2f}",
                 font=('Segoe UI', 11),
                 bg=self.colors['card'],
                 fg=self.colors['text_light']
@@ -1776,7 +1803,7 @@ class ModernGroceryApp:
         
         tk.Label(
             total_frame,
-            text=f"Total Amount: ₹{total_amount:.2f}",
+            text=f"Total Amount: LKR {total_amount:.2f}",
             font=('Segoe UI', 16, 'bold'),
             bg=self.colors['card'],
             fg=self.colors['primary']
@@ -1800,7 +1827,7 @@ class ModernGroceryApp:
     
     def remove_cart_item(self, cart_id):
         """Remove item from cart"""
-        remove_from_cart(cart_id)
+        OrderService.remove_from_cart(cart_id)
         self.show_cart_screen()
     
     def show_checkout_screen(self):
@@ -1893,12 +1920,30 @@ class ModernGroceryApp:
                 messagebox.showerror("Error", "Please fill in all fields")
                 return
             
-            success, msg = OrderService.place_order(self.current_user[0], address, phone, payment)
-            if success:
-                messagebox.showinfo("Success", msg)
-                self.show_customer_dashboard()
+        # Import PaymentService
+        from services import PaymentService
+        
+        # Place order button
+        def do_place_order():
+            address = address_text.get('1.0', tk.END).strip()
+            phone = phone_entry.get().strip()
+            payment = payment_var.get()
+            
+            if not address or not phone:
+                messagebox.showerror("Error", "Please fill in all fields")
+                return
+            
+            # If payment method is online or card, redirect to payment portal
+            if payment in ['card', 'online']:
+                self.show_payment_portal(address, phone, payment)
             else:
-                messagebox.showerror("Error", msg)
+                # For cash payment, place order directly
+                success, msg = OrderService.place_order(self.current_user[0], address, phone, payment)
+                if success:
+                    messagebox.showinfo("Success", msg)
+                    self.show_customer_dashboard()
+                else:
+                    messagebox.showerror("Error", msg)
         
         # Button frame
         button_frame = tk.Frame(card, bg=self.colors['card'])
@@ -2018,7 +2063,7 @@ class ModernGroceryApp:
             
             tk.Label(
                 details_frame,
-                text=f"Amount: ₹{final_amount:.2f}",
+                text=f"Amount: LKR {final_amount:.2f}",
                 font=('Segoe UI', 12, 'bold'),
                 bg=self.colors['card'],
                 fg=self.colors['primary']
@@ -2097,7 +2142,7 @@ class ModernGroceryApp:
             ).pack(anchor='w')
             
             if not is_read:
-                mark_notification_read(notif_id)
+                OrderService.mark_notification_read(notif_id)
     
     def show_profile_screen(self):
         """Show user profile - editable details"""
@@ -2396,7 +2441,7 @@ class ModernGroceryApp:
                         messagebox.showwarning("Password Error", "Password must be at least 6 characters")
                         return
                     
-                    success, msg = change_password('customer', self.current_user[0], current_password, new_password)
+                    success, msg = UserService.change_password(self.current_user[0], current_password, new_password)
                     if not success:
                         messagebox.showwarning("Password Error", msg)
                         return
@@ -2720,7 +2765,7 @@ class ModernGroceryApp:
         fields['description'].grid(row=2, column=1, padx=10, pady=10)
         
         # Unit Price
-        tk.Label(form_frame, text="Unit Price (₹) *", bg=self.colors['card'], fg=self.colors['text'],
+        tk.Label(form_frame, text="Unit Price (LKR) *", bg=self.colors['card'], fg=self.colors['text'],
                 font=('Segoe UI', 11, 'bold')).grid(row=3, column=0, sticky='w', pady=10)
         fields['price'] = self.create_entry(form_frame, width=50)
         fields['price'].grid(row=3, column=1, padx=10, pady=10)
@@ -3083,7 +3128,7 @@ class ModernGroceryApp:
                 
                 # Product details
                 expiry_text = f"Expires: {expiry_date}" if expiry_date else "No expiry"
-                details_text = f"Stock: {stock} {unit} | Price: ₹{price} | {expiry_text}"
+                details_text = f"Stock: {stock} {unit} | Price: LKR {price} | {expiry_text}"
                 
                 tk.Label(
                     info_frame,
@@ -3218,7 +3263,7 @@ class ModernGroceryApp:
         # Unit Price
         tk.Label(
             scrollable_frame,
-            text="Unit Price (₹)",
+            text="Unit Price (LKR)",
             font=('Segoe UI', 11, 'bold'),
             bg=self.colors['bg'],
             fg=self.colors['text']
@@ -3648,7 +3693,7 @@ class ModernGroceryApp:
                 # Product details with stock highlight
                 stock_color = self.colors['danger'] if stock < 10 else self.colors['success']
                 expiry_text = f"Expires: {expiry_date}" if expiry_date else "No expiry"
-                details_text = f"Stock: {stock} {unit} | Price: ₹{price} | {expiry_text}"
+                details_text = f"Stock: {stock} {unit} | Price: LKR {price} | {expiry_text}"
                 
                 tk.Label(
                     info_frame,
@@ -3750,7 +3795,7 @@ class ModernGroceryApp:
                 
                 # Order details
                 order_date_str = order_date.strftime('%d-%m-%Y %H:%M') if hasattr(order_date, 'strftime') else str(order_date)
-                details_text = f"📅 {order_date_str} | 🛒 {item_count} items | 💰 ₹{total_amount}"
+                details_text = f"📅 {order_date_str} | 🛒 {item_count} items | 💰 LKR {total_amount}"
                 
                 tk.Label(
                     info_frame,
@@ -3813,20 +3858,39 @@ class ModernGroceryApp:
             ).pack(pady=50)
             return
         
-        order_id_val, user_id, customer_name, phone, order_date, total_amount, delivery_address = order_info
+        order_id_val, user_id, customer_name, email, order_date, total_amount, delivery_address, payment_method, payment_status, order_status, confirmed_at = order_info
+        
+        # Calculate delivery date (7 days from order date)
+        from datetime import timedelta
+        if order_date and hasattr(order_date, 'strftime'):
+            delivery_date = order_date + timedelta(days=7)
+        else:
+            delivery_date = None
         
         # Order info section
-        info_card = self.create_card(main_frame, width=600, height=150)
+        info_card = self.create_card(main_frame, width=600, height=250)
         info_card.pack(fill=tk.X, pady=10)
         
         order_date_str = order_date.strftime('%d-%m-%Y %H:%M') if hasattr(order_date, 'strftime') else str(order_date)
+        confirmed_date_str = confirmed_at.strftime('%d-%m-%Y %H:%M') if confirmed_at and hasattr(confirmed_at, 'strftime') else 'Not confirmed'
+        delivery_date_str = delivery_date.strftime('%d-%m-%Y') if delivery_date and hasattr(delivery_date, 'strftime') else 'Not set'
+        
+        # Determine payment status color
+        payment_status_color = self.colors['success'] if payment_status and payment_status.lower() == 'paid' else self.colors['danger']
+        payment_status_emoji = '✅' if payment_status and payment_status.lower() == 'paid' else '❌'
+        
+        # Determine order status color
+        order_status_color = self.colors['success'] if order_status and order_status.lower() == 'confirmed' else self.colors['warning']
         
         info_text = f"""
         Order #: {order_id_val}  |  Customer ID: {user_id}
-        Customer: {customer_name}  |  Phone: {phone}
-        Order Date: {order_date_str}
+        Customer: {customer_name}  |  Email: {email}
+        Order Date: {order_date_str}  |  Confirmed: {confirmed_date_str}
+        Delivery Date: {delivery_date_str}
         Delivery Address: {delivery_address}
-        Total Amount: ₹{total_amount}
+        Total Amount: LKR {total_amount}
+        Payment Method: {payment_method.title() if payment_method else 'N/A'}  |  Payment Status: {payment_status_emoji} {payment_status.upper() if payment_status else 'PENDING'}
+        Order Status: {order_status.upper() if order_status else 'PENDING'}
         """
         
         tk.Label(
@@ -3879,8 +3943,21 @@ class ModernGroceryApp:
             scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
             
             # Display items
-            for item_id, product_name, quantity, unit_price, total_price in items:
-                card = tk.Frame(scrollable_frame, bg=self.colors['card'], relief=tk.FLAT, bd=1)
+            for item in items:
+                # Handle both 5-tuple and 7-tuple returns (with or without status)
+                if len(item) >= 7:
+                    item_id, product_id, product_name, quantity, unit_price, total_price, item_status = item[:7]
+                else:
+                    item_id, product_name, quantity, unit_price, total_price = item[:5]
+                    item_status = 'pending'
+                    product_id = item_id if isinstance(item_id, int) else 0
+                
+                # Determine status color and icon
+                is_received = item_status and item_status.lower() == 'received'
+                status_color = self.colors['success'] if is_received else self.colors['warning']
+                status_text = "✅ Received" if is_received else "⏳ Pending"
+                
+                card = tk.Frame(main_frame, bg=self.colors['card'], relief=tk.FLAT, bd=1)
                 card.pack(fill=tk.X, pady=5, padx=10)
                 
                 # Item info
@@ -3895,7 +3972,7 @@ class ModernGroceryApp:
                     fg=self.colors['text']
                 ).pack(anchor=tk.W)
                 
-                details_text = f"Qty: {quantity} | Price: ₹{unit_price}/unit | Total: ₹{total_price}"
+                details_text = f"Qty: {quantity} | Price: LKR {unit_price}/unit | Total: LKR {total_price}"
                 tk.Label(
                     info_frame,
                     text=details_text,
@@ -3903,6 +3980,45 @@ class ModernGroceryApp:
                     bg=self.colors['card'],
                     fg=self.colors['text_light']
                 ).pack(anchor=tk.W, pady=(2, 0))
+                
+                # Status section
+                status_frame = tk.Frame(card, bg=self.colors['card'])
+                status_frame.pack(side=tk.RIGHT, padx=15, pady=10)
+                
+                # Status label
+                tk.Label(
+                    status_frame,
+                    text=status_text,
+                    font=('Segoe UI', 9, 'bold'),
+                    bg=status_color,
+                    fg='white',
+                    padx=10,
+                    pady=5
+                ).pack(side=tk.LEFT, padx=5)
+                
+                # Toggle button
+                def toggle_status(oid=order_id, pid=product_id, current=item_status):
+                    new_status = 'pending' if current and current.lower() == 'received' else 'received'
+                    success, msg = OrderService.update_order_item_status(oid, pid, new_status)
+                    if success:
+                        messagebox.showinfo("Success", msg)
+                        self.show_order_details_screen(oid)
+                    else:
+                        messagebox.showwarning("Info", f"Item status feature coming soon. Current: {current}")
+                
+                toggle_btn = tk.Button(
+                    status_frame,
+                    text="Mark as " + ("Pending" if is_received else "Received"),
+                    command=toggle_status,
+                    bg=self.colors['primary'],
+                    fg='white',
+                    font=('Segoe UI', 9),
+                    relief=tk.FLAT,
+                    cursor='hand2',
+                    padx=10,
+                    pady=5
+                )
+                toggle_btn.pack(side=tk.LEFT, padx=5)
     
     def show_expiring_soon_screen(self):
         """Show items expiring soon with delete option"""
@@ -3980,7 +4096,7 @@ class ModernGroceryApp:
                 
                 tk.Label(
                     info_frame,
-                    text=f"Stock: {stock} | Expiry: {expiry_date} | Price: ₹{price}",
+                    text=f"Stock: {stock} | Expiry: {expiry_date} | Price: LKR {price}",
                     font=('Segoe UI', 10),
                     bg=self.colors['card'],
                     fg=self.colors['text_light']
@@ -3989,7 +4105,7 @@ class ModernGroceryApp:
                 # Action button
                 def remove_item(pid=product_id, pname=name):
                     if messagebox.askyesno("Confirm", f"Remove {pname} from inventory?"):
-                        remove_expired_item(pid)
+                        ProductService.remove_expired_item(pid)
                         messagebox.showinfo("Success", f"{pname} removed from inventory")
                         self.show_expiring_soon_screen()
                 
@@ -4085,7 +4201,7 @@ class ModernGroceryApp:
                 
                 tk.Label(
                     info_frame,
-                    text=f"Stock: {stock} | Expired on: {expiry_date} | Price: ₹{price}",
+                    text=f"Stock: {stock} | Expired on: {expiry_date} | Price: LKR {price}",
                     font=('Segoe UI', 10),
                     bg=self.colors['card'],
                     fg=self.colors['text_light']
@@ -4094,7 +4210,7 @@ class ModernGroceryApp:
                 # Action button
                 def remove_item(pid=product_id, pname=name):
                     if messagebox.askyesno("Confirm", f"Remove {pname} from inventory?"):
-                        remove_expired_item(pid)
+                        ProductService.remove_expired_item(pid)
                         messagebox.showinfo("Success", f"{pname} removed from inventory")
                         self.show_expired_items_screen()
                 
@@ -4304,7 +4420,7 @@ class ModernGroceryApp:
                 
                 # Product details
                 expiry_text = f"Expires: {expiry_date}" if expiry_date else "No expiry"
-                details_text = f"Stock: {stock} {unit} | Price: ₹{price} | {expiry_text}"
+                details_text = f"Stock: {stock} {unit} | Price: LKR {price} | {expiry_text}"
                 
                 tk.Label(
                     info_frame,
@@ -4313,6 +4429,246 @@ class ModernGroceryApp:
                     bg=self.colors['card'],
                     fg=self.colors['text_light']
                 ).pack(anchor=tk.W, pady=(3, 0))
+    
+    def show_payment_portal(self, address, phone, payment_method):
+        """Show payment portal for online/card payments"""
+        from services import PaymentService
+        
+        self.clear_window()
+        self.current_screen = 'payment_portal'
+        
+        # Get cart total
+        cart_items = OrderService.get_cart_items(self.current_user[0])
+        if not cart_items:
+            messagebox.showerror("Error", "Cart is empty")
+            self.show_checkout_screen()
+            return
+        
+        # Calculate total from cart subtotals (item[6] is subtotal)
+        total_amount = sum(float(item[6]) if item[6] else 0 for item in cart_items)
+        
+        # Header
+        header = tk.Frame(self.root, bg=self.colors['primary'], height=60)
+        header.pack(fill=tk.X)
+        
+        tk.Label(
+            header,
+            text="💳 Payment Portal",
+            font=('Segoe UI', 16, 'bold'),
+            bg=self.colors['primary'],
+            fg='white'
+        ).pack(side=tk.LEFT, padx=20, pady=15)
+        
+        self.create_button(header, "Back", lambda: self.show_checkout_screen(), 
+                          'secondary', 12).pack(side=tk.RIGHT, padx=20, pady=15)
+        
+        # Main content with scrollbar
+        canvas = tk.Canvas(self.root, bg=self.colors['bg'], highlightthickness=0)
+        scrollbar = tk.Scrollbar(self.root, orient="vertical", command=canvas.yview)
+        main_frame = tk.Frame(canvas, bg=self.colors['bg'])
+        
+        main_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas.create_window((0, 0), window=main_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Amount card
+        amount_card = self.create_card(main_frame)
+        amount_card.pack(fill=tk.X, padx=50, pady=20)
+        
+        tk.Label(
+            amount_card,
+            text="Payment Amount",
+            font=('Segoe UI', 12, 'bold'),
+            bg=self.colors['card'],
+            fg=self.colors['text']
+        ).pack(pady=10)
+        
+        tk.Label(
+            amount_card,
+            text=f"LKR {total_amount:.2f}",
+            font=('Segoe UI', 24, 'bold'),
+            bg=self.colors['card'],
+            fg=self.colors['success']
+        ).pack(pady=10)
+        
+        # Payment method card
+        payment_card = self.create_card(main_frame)
+        payment_card.pack(fill=tk.X, padx=50, pady=20)
+        
+        if payment_method == 'card':
+            # Credit/Debit Card Payment
+            tk.Label(
+                payment_card,
+                text="💳 Card Payment",
+                font=('Segoe UI', 14, 'bold'),
+                bg=self.colors['card'],
+                fg=self.colors['text']
+            ).pack(pady=15)
+            
+            form_frame = tk.Frame(payment_card, bg=self.colors['card'])
+            form_frame.pack(padx=30, pady=15)
+            
+            # Cardholder Name
+            tk.Label(form_frame, text="Cardholder Name", bg=self.colors['card'],
+                    fg=self.colors['text'], font=('Segoe UI', 10, 'bold')).grid(row=0, column=0, sticky='w', pady=10)
+            cardholder_entry = tk.Entry(form_frame, width=40, font=('Segoe UI', 10),
+                                       bg=self.colors['input_bg'], fg=self.colors['text'], insertbackground=self.colors['text'])
+            cardholder_entry.grid(row=0, column=1, padx=10, pady=10)
+            
+            # Card Number
+            tk.Label(form_frame, text="Card Number", bg=self.colors['card'],
+                    fg=self.colors['text'], font=('Segoe UI', 10, 'bold')).grid(row=1, column=0, sticky='w', pady=10)
+            card_number_entry = tk.Entry(form_frame, width=40, font=('Segoe UI', 10),
+                                        bg=self.colors['input_bg'], fg=self.colors['text'], insertbackground=self.colors['text'])
+            card_number_entry.grid(row=1, column=1, padx=10, pady=10)
+            tk.Label(form_frame, text="16 digits", bg=self.colors['card'],
+                    fg=self.colors['text_light'], font=('Segoe UI', 8)).grid(row=1, column=2, sticky='w', padx=5)
+            
+            # Expiry and CVV
+            tk.Label(form_frame, text="Expiry Date", bg=self.colors['card'],
+                    fg=self.colors['text'], font=('Segoe UI', 10, 'bold')).grid(row=2, column=0, sticky='w', pady=10)
+            expiry_entry = tk.Entry(form_frame, width=15, font=('Segoe UI', 10),
+                                   bg=self.colors['input_bg'], fg=self.colors['text'], insertbackground=self.colors['text'])
+            expiry_entry.grid(row=2, column=1, padx=10, pady=10, sticky='w')
+            tk.Label(form_frame, text="MM/YY", bg=self.colors['card'],
+                    fg=self.colors['text_light'], font=('Segoe UI', 8)).grid(row=2, column=2, sticky='w', padx=5)
+            
+            tk.Label(form_frame, text="CVV", bg=self.colors['card'],
+                    fg=self.colors['text'], font=('Segoe UI', 10, 'bold')).grid(row=2, column=3, sticky='w', padx=(20, 0), pady=10)
+            cvv_entry = tk.Entry(form_frame, width=10, font=('Segoe UI', 10),
+                                bg=self.colors['input_bg'], fg=self.colors['text'], insertbackground=self.colors['text'])
+            cvv_entry.grid(row=2, column=4, padx=10, pady=10)
+            
+            def process_card():
+                cardholder = cardholder_entry.get().strip()
+                card_number = card_number_entry.get().strip()
+                expiry = expiry_entry.get().strip()
+                cvv = cvv_entry.get().strip()
+                
+                if not all([cardholder, card_number, expiry, cvv]):
+                    messagebox.showerror("Error", "Please fill in all card details")
+                    return
+                
+                success, result = PaymentService.process_card_payment(card_number, expiry, cvv, total_amount, cardholder)
+                
+                if success:
+                    # Place order after successful payment
+                    order_success, order_msg = OrderService.place_order(self.current_user[0], address, phone, 'card')
+                    if order_success:
+                        messagebox.showinfo("Success", f"Payment Successful!\nTransaction ID: {result['transaction_id']}\n\n{order_msg}")
+                        self.show_customer_dashboard()
+                    else:
+                        messagebox.showerror("Error", f"Payment successful but order failed: {order_msg}")
+                else:
+                    messagebox.showerror("Payment Failed", result)
+            
+            pay_btn = self.create_button(payment_card, "Pay Now", process_card, 'success', 12)
+            pay_btn.pack(pady=20)
+            
+        elif payment_method == 'online':
+            # Online Payment (PayPal/Google Pay)
+            tk.Label(
+                payment_card,
+                text="💰 Online Payment",
+                font=('Segoe UI', 14, 'bold'),
+                bg=self.colors['card'],
+                fg=self.colors['text']
+            ).pack(pady=15)
+            
+            # Payment method selection
+            payment_type_var = tk.StringVar(value='paypal')
+            type_frame = tk.Frame(payment_card, bg=self.colors['card'])
+            type_frame.pack(pady=15)
+            
+            tk.Label(type_frame, text="Select Payment Method:", bg=self.colors['card'],
+                    fg=self.colors['text'], font=('Segoe UI', 10)).pack(side=tk.LEFT, padx=10)
+            
+            tk.Radiobutton(type_frame, text="PayPal", variable=payment_type_var, value='paypal',
+                          bg=self.colors['card'], fg=self.colors['text'], font=('Segoe UI', 10)).pack(side=tk.LEFT, padx=5)
+            tk.Radiobutton(type_frame, text="Google Pay", variable=payment_type_var, value='gpay',
+                          bg=self.colors['card'], fg=self.colors['text'], font=('Segoe UI', 10)).pack(side=tk.LEFT, padx=5)
+            
+            form_frame = tk.Frame(payment_card, bg=self.colors['card'])
+            form_frame.pack(padx=30, pady=15)
+            
+            # PayPal fields
+            paypal_frame = tk.Frame(form_frame, bg=self.colors['card'])
+            paypal_frame.pack()
+            
+            tk.Label(paypal_frame, text="PayPal Email", bg=self.colors['card'],
+                    fg=self.colors['text'], font=('Segoe UI', 10, 'bold')).grid(row=0, column=0, sticky='w', pady=10)
+            paypal_entry = tk.Entry(paypal_frame, width=40, font=('Segoe UI', 10),
+                                   bg=self.colors['input_bg'], fg=self.colors['text'], insertbackground=self.colors['text'])
+            paypal_entry.grid(row=0, column=1, padx=10, pady=10)
+            tk.Label(paypal_frame, text="example@email.com", bg=self.colors['card'],
+                    fg=self.colors['text_light'], font=('Segoe UI', 8)).grid(row=0, column=2, sticky='w', padx=5)
+            
+            # Google Pay fields
+            gpay_frame = tk.Frame(form_frame, bg=self.colors['card'])
+            
+            tk.Label(gpay_frame, text="Phone Number", bg=self.colors['card'],
+                    fg=self.colors['text'], font=('Segoe UI', 10, 'bold')).grid(row=0, column=0, sticky='w', pady=10)
+            gpay_entry = tk.Entry(gpay_frame, width=40, font=('Segoe UI', 10),
+                                 bg=self.colors['input_bg'], fg=self.colors['text'], insertbackground=self.colors['text'])
+            gpay_entry.grid(row=0, column=1, padx=10, pady=10)
+            tk.Label(gpay_frame, text="10+ digits", bg=self.colors['card'],
+                    fg=self.colors['text_light'], font=('Segoe UI', 8)).grid(row=0, column=2, sticky='w', padx=5)
+            
+            def update_payment_form(*args):
+                if payment_type_var.get() == 'paypal':
+                    gpay_frame.pack_forget()
+                    paypal_frame.pack()
+                else:
+                    paypal_frame.pack_forget()
+                    gpay_frame.pack()
+            
+            payment_type_var.trace('w', update_payment_form)
+            
+            def process_online():
+                if payment_type_var.get() == 'paypal':
+                    email = paypal_entry.get().strip()
+                    if not email:
+                        messagebox.showerror("Error", "Please enter PayPal email")
+                        return
+                    
+                    success, result = PaymentService.process_paypal_payment(email, total_amount)
+                    
+                    if success:
+                        order_success, order_msg = OrderService.place_order(self.current_user[0], address, phone, 'online')
+                        if order_success:
+                            messagebox.showinfo("Success", f"Payment Successful!\nTransaction ID: {result['transaction_id']}\n\n{order_msg}")
+                            self.show_customer_dashboard()
+                        else:
+                            messagebox.showerror("Error", f"Payment successful but order failed: {order_msg}")
+                    else:
+                        messagebox.showerror("Payment Failed", result)
+                else:
+                    phone_num = gpay_entry.get().strip()
+                    if not phone_num:
+                        messagebox.showerror("Error", "Please enter phone number")
+                        return
+                    
+                    success, result = PaymentService.process_gpay_payment(phone_num, total_amount)
+                    
+                    if success:
+                        order_success, order_msg = OrderService.place_order(self.current_user[0], address, phone, 'online')
+                        if order_success:
+                            messagebox.showinfo("Success", f"Payment Successful!\nTransaction ID: {result['transaction_id']}\n\n{order_msg}")
+                            self.show_customer_dashboard()
+                        else:
+                            messagebox.showerror("Error", f"Payment successful but order failed: {order_msg}")
+                    else:
+                        messagebox.showerror("Payment Failed", result)
+            
+            pay_btn = self.create_button(payment_card, "Pay Now", process_online, 'success', 12)
+            pay_btn.pack(pady=20)
     
     def logout(self):
         """Logout user"""

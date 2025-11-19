@@ -17,6 +17,7 @@ class UIColors:
         'accent_light': '#E3F2FD', # Light blue
         'danger': '#F44336',       # Red
         'success': '#4CAF50',      # Green
+        'warning': '#FF9800',      # Orange/Amber warning
         'bg': '#F8F9FA',          # Light background
         'bg_secondary': '#FFFFFF', # White
         'card': '#FFFFFF',         # White cards

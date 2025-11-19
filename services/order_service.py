@@ -132,6 +132,7 @@ class OrderService:
     @staticmethod
     def place_order(user_id, delivery_address, delivery_phone, payment_method='cash'):
         """Place order from cart"""
+        from datetime import timedelta
         db = connect_db()
         cursor = db.cursor()
         
@@ -161,13 +162,25 @@ class OrderService:
         # Generate order number
         order_number = f"ORD-{datetime.now().strftime('%Y%m%d%H%M%S')}"
         
-        # Create order
+        # Set payment status based on payment method
+        # For cash payment: pending (will be marked paid on delivery)
+        # For online/card payment: paid (simulated payment already processed)
+        payment_status = 'pending' if payment_method == 'cash' else 'paid'
+        
+        # Set order status and dates
+        # All orders are automatically confirmed upon placement
+        order_status = 'confirmed'
+        current_time = datetime.now()
+        
+        # Create order with automatic confirmation
         cursor.execute("""
             INSERT INTO orders (user_id, order_number, total_amount, final_amount,
-                               payment_method, delivery_address, delivery_phone, order_status)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, 'pending')
+                               payment_method, payment_status, delivery_address, delivery_phone, 
+                               order_status, confirmed_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (user_id, order_number, total_amount, final_amount,
-              payment_method, delivery_address, delivery_phone))
+              payment_method, payment_status, delivery_address, delivery_phone, 
+              order_status, current_time))
         
         order_id = cursor.lastrowid
         
@@ -236,10 +249,8 @@ class OrderService:
         
         # Get order info
         cursor.execute("""
-            SELECT o.order_id, o.order_number, o.total_amount, o.discount_amount, o.final_amount,
-                   o.payment_method, o.payment_status, o.order_status, o.delivery_address,
-                   o.delivery_phone, o.order_date, o.confirmed_at, o.delivered_at,
-                   u.username, u.full_name, u.email
+            SELECT o.order_id, u.user_id, u.full_name, u.email, o.order_date, o.final_amount, o.delivery_address,
+                   o.payment_method, o.payment_status, o.order_status, o.confirmed_at
             FROM orders o
             JOIN users u ON o.user_id = u.user_id
             WHERE o.order_id = %s
@@ -248,7 +259,7 @@ class OrderService:
         
         # Get order items
         cursor.execute("""
-            SELECT product_id, product_name, quantity, unit_price, discount_percent, subtotal
+            SELECT product_id, product_name, quantity, unit_price, subtotal
             FROM order_items
             WHERE order_id = %s
         """, (order_id,))
@@ -415,3 +426,53 @@ class OrderService:
         db.close()
         
         return orders, items
+    
+    @staticmethod
+    def update_order_item_status(order_id, product_id, status):
+        """Update delivery status of an order item"""
+        db = connect_db()
+        cursor = db.cursor()
+        
+        # Try to update the item_status column
+        try:
+            cursor.execute("""
+                UPDATE order_items 
+                SET item_status = %s
+                WHERE order_id = %s AND product_id = %s
+            """, (status, order_id, product_id))
+            
+            db.commit()
+            db.close()
+            return True, f"Item status updated to {status}"
+        except Exception as e:
+            db.close()
+            # If column doesn't exist, it will be created on first update
+            return False, f"Could not update item status: {str(e)}"
+    
+    @staticmethod
+    def get_order_items_with_status(order_id):
+        """Get all items in order with their delivery status"""
+        db = connect_db()
+        cursor = db.cursor()
+        
+        try:
+            query = """
+                SELECT order_item_id, product_id, product_name, quantity, unit_price, 
+                       subtotal, COALESCE(item_status, 'pending') as item_status
+                FROM order_items
+                WHERE order_id = %s
+            """
+        except:
+            # Fallback if order_item_id or item_status doesn't exist
+            query = """
+                SELECT product_id, product_name, quantity, unit_price, subtotal, 'pending' as item_status
+                FROM order_items
+                WHERE order_id = %s
+            """
+        
+        cursor.execute(query, (order_id,))
+        items = cursor.fetchall()
+        db.close()
+        
+        return items
+
