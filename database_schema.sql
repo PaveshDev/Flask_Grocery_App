@@ -1,6 +1,8 @@
 -- ====================================================================
--- Grocery App Database Schema - Complete E-Commerce System
+-- Grocery App Database Schema - Sri Lankan E-Commerce System
 -- Database: grocery_app_db
+-- Currency: LKR (Sri Lankan Rupee)
+-- Cleaned & Optimized for buyMe Project
 -- ====================================================================
 
 -- Drop database if exists and create fresh
@@ -150,10 +152,9 @@ CREATE TABLE order_items (
     order_item_id INT AUTO_INCREMENT PRIMARY KEY,
     order_id INT NOT NULL,
     product_id INT NOT NULL,
-    product_name VARCHAR(200) NOT NULL,  -- Snapshot at order time
+    product_name VARCHAR(200) NOT NULL,
     quantity INT NOT NULL,
-    unit_price DECIMAL(10, 2) NOT NULL,  -- Price at order time
-    discount_percent DECIMAL(5, 2) DEFAULT 0.00,
+    unit_price DECIMAL(10, 2) NOT NULL,
     subtotal DECIMAL(10, 2) NOT NULL,
     FOREIGN KEY (order_id) REFERENCES orders(order_id) ON DELETE CASCADE,
     FOREIGN KEY (product_id) REFERENCES products(product_id),
@@ -162,12 +163,12 @@ CREATE TABLE order_items (
 );
 
 -- ====================================================================
--- 9. NOTIFICATIONS TABLE - User notifications
+-- 9. NOTIFICATIONS TABLE - Order and payment notifications
 -- ====================================================================
 CREATE TABLE notifications (
     notification_id INT AUTO_INCREMENT PRIMARY KEY,
     user_id INT NOT NULL,
-    type ENUM('order_placed', 'order_confirmed', 'order_shipped', 'order_delivered', 'payment', 'promotion') NOT NULL,
+    type ENUM('order_placed', 'order_confirmed', 'order_shipped', 'order_delivered', 'payment') NOT NULL,
     title VARCHAR(200) NOT NULL,
     message TEXT NOT NULL,
     order_id INT NULL,
@@ -176,40 +177,7 @@ CREATE TABLE notifications (
     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
     FOREIGN KEY (order_id) REFERENCES orders(order_id) ON DELETE CASCADE,
     INDEX idx_user (user_id),
-    INDEX idx_read (is_read),
-    INDEX idx_created (created_at)
-);
-
--- ====================================================================
--- 10. PRODUCT_REVIEWS TABLE - Customer reviews
--- ====================================================================
-CREATE TABLE product_reviews (
-    review_id INT AUTO_INCREMENT PRIMARY KEY,
-    product_id INT NOT NULL,
-    user_id INT NOT NULL,
-    rating INT CHECK (rating BETWEEN 1 AND 5),
-    review_text TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (product_id) REFERENCES products(product_id) ON DELETE CASCADE,
-    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
-    INDEX idx_product (product_id),
-    INDEX idx_user (user_id),
-    INDEX idx_rating (rating)
-);
-
--- ====================================================================
--- 11. ACTIVITY_LOG TABLE - Track admin actions
--- ====================================================================
-CREATE TABLE activity_log (
-    log_id INT AUTO_INCREMENT PRIMARY KEY,
-    staff_id INT NOT NULL,
-    action_type VARCHAR(100) NOT NULL,  -- add_product, update_stock, etc.
-    description TEXT,
-    ip_address VARCHAR(45),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (staff_id) REFERENCES staff(staff_id),
-    INDEX idx_staff (staff_id),
-    INDEX idx_created (created_at)
+    INDEX idx_read (is_read)
 );
 
 -- ====================================================================
@@ -220,7 +188,7 @@ CREATE TABLE activity_log (
 INSERT INTO staff (username, password, email, full_name, role) VALUES
 ('admin', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5GyYsL0MCWm8u', 'admin@groceryapp.com', 'System Administrator', 'admin');
 
--- Default categories
+-- Default categories for Sri Lanka
 INSERT INTO categories (category_name, description, icon) VALUES
 ('Fruits', 'Fresh fruits and berries', '🍎'),
 ('Vegetables', 'Fresh vegetables and greens', '🥕'),
@@ -233,141 +201,6 @@ INSERT INTO categories (category_name, description, icon) VALUES
 ('Pantry', 'Rice, pasta, canned goods and spices', '🥫'),
 ('Personal Care', 'Soaps, shampoos and hygiene products', '🧴');
 
--- Sample products
-INSERT INTO products (name, category_id, description, unit_price, unit, stock_quantity) VALUES
-('Red Apple', 1, 'Fresh and crispy red apples', 3.99, 'kg', 100),
-('Banana', 1, 'Sweet ripe bananas', 2.49, 'kg', 150),
-('Orange', 1, 'Juicy oranges', 4.99, 'kg', 80),
-('Tomato', 2, 'Fresh red tomatoes', 3.49, 'kg', 120),
-('Carrot', 2, 'Fresh carrots', 2.99, 'kg', 90),
-('Fresh Milk', 3, 'Full cream fresh milk', 5.99, 'liter', 60),
-('White Bread', 4, 'Soft white bread loaf', 2.99, 'unit', 50),
-('Chicken Breast', 5, 'Boneless chicken breast', 12.99, 'kg', 40),
-('Orange Juice', 6, 'Fresh orange juice', 6.99, 'liter', 70),
-('Potato Chips', 7, 'Crispy salted chips', 3.99, 'pack', 100);
-
--- ====================================================================
--- USEFUL VIEWS
--- ====================================================================
-
--- Low stock products view
-CREATE VIEW low_stock_products AS
-SELECT p.product_id, p.name, p.stock_quantity, p.min_stock_level, c.category_name
-FROM products p
-JOIN categories c ON p.category_id = c.category_id
-WHERE p.stock_quantity <= p.min_stock_level
-ORDER BY p.stock_quantity ASC;
-
--- Product sales summary
-CREATE VIEW product_sales_summary AS
-SELECT 
-    p.product_id,
-    p.name,
-    c.category_name,
-    COUNT(DISTINCT oi.order_id) as total_orders,
-    SUM(oi.quantity) as total_quantity_sold,
-    SUM(oi.subtotal) as total_revenue
-FROM products p
-LEFT JOIN order_items oi ON p.product_id = oi.product_id
-LEFT JOIN categories c ON p.category_id = c.category_id
-GROUP BY p.product_id, p.name, c.category_name;
-
--- User order history view
-CREATE VIEW user_order_summary AS
-SELECT 
-    u.user_id,
-    u.username,
-    u.full_name,
-    COUNT(o.order_id) as total_orders,
-    SUM(o.final_amount) as total_spent,
-    MAX(o.order_date) as last_order_date
-FROM users u
-LEFT JOIN orders o ON u.user_id = o.user_id
-GROUP BY u.user_id, u.username, u.full_name;
-
--- ====================================================================
--- STORED PROCEDURES
--- ====================================================================
-
-DELIMITER //
-
--- Procedure to add product to cart
-CREATE PROCEDURE add_to_cart(
-    IN p_user_id INT,
-    IN p_product_id INT,
-    IN p_quantity INT
-)
-BEGIN
-    DECLARE current_stock INT;
-    
-    -- Check stock availability
-    SELECT stock_quantity INTO current_stock FROM products WHERE product_id = p_product_id;
-    
-    IF current_stock >= p_quantity THEN
-        INSERT INTO shopping_cart (user_id, product_id, quantity)
-        VALUES (p_user_id, p_product_id, p_quantity)
-        ON DUPLICATE KEY UPDATE quantity = quantity + p_quantity;
-    ELSE
-        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Insufficient stock';
-    END IF;
-END //
-
--- Procedure to place order
-CREATE PROCEDURE place_order(
-    IN p_user_id INT,
-    IN p_delivery_address TEXT,
-    IN p_delivery_phone VARCHAR(20),
-    IN p_payment_method VARCHAR(20),
-    OUT p_order_id INT
-)
-BEGIN
-    DECLARE v_order_number VARCHAR(50);
-    DECLARE v_total DECIMAL(10, 2);
-    
-    -- Generate order number
-    SET v_order_number = CONCAT('ORD-', DATE_FORMAT(NOW(), '%Y%m%d'), '-', LPAD(FLOOR(RAND() * 10000), 4, '0'));
-    
-    -- Calculate total
-    SELECT SUM(p.unit_price * sc.quantity) INTO v_total
-    FROM shopping_cart sc
-    JOIN products p ON sc.product_id = p.product_id
-    WHERE sc.user_id = p_user_id;
-    
-    -- Create order
-    INSERT INTO orders (user_id, order_number, total_amount, final_amount, delivery_address, delivery_phone, payment_method, order_status)
-    VALUES (p_user_id, v_order_number, v_total, v_total, p_delivery_address, p_delivery_phone, p_payment_method, 'pending');
-    
-    SET p_order_id = LAST_INSERT_ID();
-    
-    -- Add order items
-    INSERT INTO order_items (order_id, product_id, product_name, quantity, unit_price, subtotal)
-    SELECT p_order_id, p.product_id, p.name, sc.quantity, p.unit_price, (p.unit_price * sc.quantity)
-    FROM shopping_cart sc
-    JOIN products p ON sc.product_id = p.product_id
-    WHERE sc.user_id = p_user_id;
-    
-    -- Update product stock
-    UPDATE products p
-    JOIN shopping_cart sc ON p.product_id = sc.product_id
-    SET p.stock_quantity = p.stock_quantity - sc.quantity
-    WHERE sc.user_id = p_user_id;
-    
-    -- Create notification
-    INSERT INTO notifications (user_id, type, title, message, order_id)
-    VALUES (p_user_id, 'order_placed', 'Order Placed Successfully!', 
-            CONCAT('Your order ', v_order_number, ' has been placed successfully.'), p_order_id);
-    
-    -- Clear cart
-    DELETE FROM shopping_cart WHERE user_id = p_user_id;
-END //
-
-DELIMITER ;
-
--- ====================================================================
--- GRANT PERMISSIONS (Optional - adjust as needed)
--- ====================================================================
--- GRANT ALL PRIVILEGES ON grocery_app_db.* TO 'root'@'localhost';
--- FLUSH PRIVILEGES;
 
 -- ====================================================================
 -- END OF SCHEMA
